@@ -2,8 +2,14 @@
 
 import base64
 import io
+from typing import Callable, Optional
 
+import numpy as np
 from PIL import Image
+
+
+CropPreprocessor = Callable[[np.ndarray], np.ndarray]
+"""A callable `(bgr_ndarray) -> bgr_ndarray` used to clean up a crop before OCR."""
 
 
 def crop_box_to_base64(
@@ -13,6 +19,7 @@ def crop_box_to_base64(
     padding: float = 0.005,
     min_dim: int = 256,
     quality: int = 85,
+    preprocessor: Optional[CropPreprocessor] = None,
 ) -> str:
     """
     Crop a normalized bbox region out of a base64 image and return the crop
@@ -25,6 +32,8 @@ def crop_box_to_base64(
         padding: Normalized padding added around the bbox before cropping.
         min_dim: Minimum dimension (px) to upscale the crop to.
         quality: JPEG quality for the returned image.
+        preprocessor: Optional BGR->BGR cleanup (CLAHE, shadow-flatten, etc.)
+            applied to the crop before re-encode.
     """
     img = Image.open(io.BytesIO(base64.b64decode(image_base64))).convert("RGB")
     w, h = img.size
@@ -42,6 +51,11 @@ def crop_box_to_base64(
     if cw < min_dim or ch < min_dim:
         scale = max(min_dim / max(1, cw), min_dim / max(1, ch))
         crop = crop.resize((int(cw * scale), int(ch * scale)), Image.LANCZOS)
+
+    if preprocessor is not None:
+        bgr = np.asarray(crop)[:, :, ::-1].copy()  # RGB -> BGR
+        bgr = preprocessor(bgr)
+        crop = Image.fromarray(bgr[:, :, ::-1])  # BGR -> RGB
 
     buf = io.BytesIO()
     crop.save(buf, format="JPEG", quality=quality)

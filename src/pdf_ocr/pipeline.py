@@ -34,6 +34,10 @@ from src.pdf_ocr.utils.image import crop_box_to_base64
 
 ProgressCallback = Callable[[str, int, int, str], Awaitable[None]]
 OutputWriter = Callable[[str, str, dict, int], None]
+ImagePreprocessor = Callable[..., object]  # (bgr, *, page_num) -> bgr
+CropPreprocessor = Callable[[object], object]  # (bgr) -> bgr
+TextPostprocessor = Callable[[dict[int, list[str]]], object]
+"""Signature: (pages_text) -> (clean_text, fields, warnings)."""
 
 
 def parse_page_range(page_str: str, total_pages: int) -> list[int]:
@@ -64,17 +68,31 @@ class OCRPipeline:
         pdf_handler=None,
         output_writer: Optional[OutputWriter] = None,
         grounded_backend: Optional[GroundedOCRBackend] = None,
+        image_preprocessor: Optional[ImagePreprocessor] = None,
+        crop_preprocessor: Optional[CropPreprocessor] = None,
+        text_postprocessor: Optional[TextPostprocessor] = None,
     ):
         """
         When `grounded_backend` is provided, `run()` skips Surya detection,
         LLM OCR, DP alignment, and the refine stage — the backend returns
         `(bbox, text)` pairs directly. `aligner` and `ocr_processor` are
         only required for the hybrid (default) path.
+
+        `image_preprocessor` is applied page-by-page between rasterization
+        and JPEG-encode (BGR in, BGR out). `crop_preprocessor` is applied to
+        each refine-stage crop before it's sent to the LLM. When
+        `text_postprocessor` is set, the pipeline stashes a DocumentResult
+        on `self.last_result` and also short-circuits OCR on pages with an
+        embedded text layer.
         """
         self.aligner = aligner
         self.ocr_processor = ocr_processor
         self.pdf_handler = pdf_handler
         self.grounded_backend = grounded_backend
+        self.image_preprocessor = image_preprocessor
+        self.crop_preprocessor = crop_preprocessor
+        self.text_postprocessor = text_postprocessor
+        self.last_result = None  # populated when text_postprocessor is set
         if pdf_handler is None:
             raise ValueError("pdf_handler is required (used for output writing)")
         self.output_writer = output_writer or pdf_handler.embed_structured_text
@@ -121,9 +139,33 @@ class OCRPipeline:
             )
 
         await _notify(progress, "convert", 0, 1, "Converting PDF to images...")
-        images_dict = await asyncio.to_thread(
-            self.pdf_handler.convert_to_images, input_path, dpi, max_image_dim
+        use_text_fallback = (
+            self.text_postprocessor is not None
+            or self.image_preprocessor is not None
         )
+        embedded_text: dict[int, str] = {}
+        if use_text_fallback and hasattr(
+            self.pdf_handler, "convert_to_images_with_text"
+        ):
+            images_dict, embedded_text = await asyncio.to_thread(
+                self.pdf_handler.convert_to_images_with_text,
+                input_path,
+                dpi,
+                max_image_dim,
+                image_preprocessor=self.image_preprocessor,
+            )
+        else:
+            images_dict = await asyncio.to_thread(
+                self.pdf_handler.convert_to_images,
+                input_path,
+                dpi,
+                max_image_dim,
+                **(
+                    {"image_preprocessor": self.image_preprocessor}
+                    if self.image_preprocessor is not None
+                    else {}
+                ),
+            )
         page_nums = sorted(images_dict.keys())
         total_pages = len(page_nums)
 
@@ -132,21 +174,46 @@ class OCRPipeline:
             page_nums = [p for p in page_nums if p in selected]
         await _notify(progress, "convert", 1, 1, f"Converted {total_pages} pages.")
 
-        # --- Phase 1: batch layout detection ---
-        await _notify(progress, "detect", 0, 1, f"Detecting layout for {len(page_nums)} pages...")
-        image_bytes = [base64.b64decode(images_dict[p]) for p in page_nums]
-        batch_boxes = await asyncio.to_thread(
-            self.aligner.get_detected_boxes_batch, image_bytes
+        # Pages with a usable embedded text layer short-circuit the whole
+        # OCR pipeline: no Surya, no LLM call, no refine. We synthesize a
+        # single full-page entry so the output writer still emits a valid
+        # searchable layer.
+        skip_ocr_pages = {p for p in page_nums if p in embedded_text}
+        ocr_page_nums = [p for p in page_nums if p not in skip_ocr_pages]
+
+        # --- Phase 1: batch layout detection (skip pages with embedded text) ---
+        await _notify(
+            progress, "detect", 0, 1,
+            f"Detecting layout for {len(ocr_page_nums)} pages...",
         )
+        if ocr_page_nums:
+            image_bytes = [base64.b64decode(images_dict[p]) for p in ocr_page_nums]
+            batch_boxes = await asyncio.to_thread(
+                self.aligner.get_detected_boxes_batch, image_bytes
+            )
+        else:
+            batch_boxes = []
         pages_structured: dict[int, list] = {
-            p: [(box, "") for box in batch_boxes[i]] for i, p in enumerate(page_nums)
+            p: [(box, "") for box in batch_boxes[i]]
+            for i, p in enumerate(ocr_page_nums)
         }
+        # Short-circuited pages get a single full-page block with the
+        # embedded text — same shape the aligner emits when no boxes were
+        # detected, so the writer downstream doesn't care.
+        for p in skip_ocr_pages:
+            text = embedded_text.get(p, "")
+            pages_structured[p] = [([0.0, 0.0, 1.0, 1.0], text)]
         await _notify(progress, "detect", 1, 1, "Layout detection complete.")
 
         # --- Phase 2: concurrent full-page LLM OCR + DP alignment ---
         pages_text: dict[int, list[str]] = {}
+        # Seed embedded-text pages so the returned pages_text is complete.
+        for p in skip_ocr_pages:
+            text = embedded_text.get(p, "")
+            pages_text[p] = [line for line in text.split("\n") if line.strip()]
+
         semaphore = asyncio.Semaphore(max(1, concurrency))
-        total = len(page_nums)
+        total = len(ocr_page_nums)
 
         async def process_page(p_num: int):
             async with semaphore:
@@ -161,20 +228,35 @@ class OCRPipeline:
 
         completed = 0
         await _notify(progress, "ocr", 0, total, f"LLM OCR (0/{total})...")
-        for coro in asyncio.as_completed([process_page(p) for p in page_nums]):
-            p_num, llm_lines, aligned = await coro
-            pages_text[p_num] = llm_lines
-            pages_structured[p_num] = aligned
-            completed += 1
+        if total > 0:
+            for coro in asyncio.as_completed(
+                [process_page(p) for p in ocr_page_nums]
+            ):
+                p_num, llm_lines, aligned = await coro
+                pages_text[p_num] = llm_lines
+                pages_structured[p_num] = aligned
+                completed += 1
+                await _notify(
+                    progress, "ocr", completed, total,
+                    f"LLM OCR ({completed}/{total})",
+                )
+        else:
             await _notify(
-                progress, "ocr", completed, total, f"LLM OCR ({completed}/{total})"
+                progress, "ocr", 1, 1,
+                "All pages had embedded text — LLM OCR skipped.",
             )
 
         # --- Phase 3: per-box crop re-OCR for low-confidence boxes ---
-        if refine:
+        # Only refine pages that actually went through OCR; embedded-text
+        # pages are canonical already.
+        if refine and ocr_page_nums:
+            refine_structured = {p: pages_structured[p] for p in ocr_page_nums}
             await self._refine_uncertain(
-                pages_structured, images_dict, semaphore, progress
+                refine_structured, images_dict, semaphore, progress
             )
+            # Merge refined results back.
+            for p, aligned in refine_structured.items():
+                pages_structured[p] = aligned
 
         # --- Phase 4: write output ---
         await _notify(progress, "embed", 0, 1, "Writing output...")
@@ -182,6 +264,21 @@ class OCRPipeline:
             self.output_writer, input_path, output_path, pages_structured, dpi
         )
         await _notify(progress, "embed", 1, 1, "Done.")
+
+        # --- Phase 5: optional text post-processing + field extraction ---
+        if self.text_postprocessor is not None:
+            try:
+                raw = self.text_postprocessor(pages_text)
+                result = await raw if asyncio.iscoroutine(raw) else raw
+            except Exception as e:
+                import logging
+                logging.warning("text postprocessor failed: %s", e)
+                result = None
+            if result is not None:
+                self.last_result = _build_document_result(
+                    result, pages_text, output_path
+                )
+
         return pages_text
 
     async def _run_grounded(
@@ -251,7 +348,10 @@ class OCRPipeline:
         async def refine_one(p_num: int, idx: int, bbox: list[float]):
             async with semaphore:
                 crop_b64 = await asyncio.to_thread(
-                    crop_box_to_base64, images_dict[p_num], bbox
+                    crop_box_to_base64,
+                    images_dict[p_num],
+                    bbox,
+                    preprocessor=self.crop_preprocessor,
                 )
                 text = await self.ocr_processor.perform_ocr_on_crop(crop_b64)
                 return p_num, idx, text
@@ -289,3 +389,28 @@ def _is_refinable(bbox: list[float]) -> bool:
 async def _notify(cb: Optional[ProgressCallback], stage, current, total, message):
     if cb is not None:
         await cb(stage, current, total, message)
+
+
+def _build_document_result(result, pages_text, output_path: str):
+    """
+    Adapt the text_postprocessor return value into a DocumentResult.
+
+    The postprocessor contract is `(clean_text, fields, warnings)` — a plain
+    tuple so the pipeline doesn't have a hard dependency on the
+    postprocessing package.
+    """
+    from src.pdf_ocr.postprocessing.schema import DocumentResult
+
+    if isinstance(result, DocumentResult):
+        result.pages_text = pages_text
+        result.output_pdf = output_path
+        return result
+
+    text, fields, warnings = result
+    return DocumentResult(
+        text=text,
+        pages_text=pages_text,
+        fields=fields,
+        warnings=warnings,
+        output_pdf=output_path,
+    )

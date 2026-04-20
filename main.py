@@ -72,6 +72,29 @@ Examples:
     )
     parser.add_argument("--api-base", help="Override LLM API base URL")
     parser.add_argument("--model", help="Override LLM model name")
+    parser.add_argument(
+        "--preprocess", choices=["auto", "off", "aggressive"], default="off",
+        help="Per-page adaptive image preprocessing (deskew, CLAHE, shadow flatten, "
+             "denoise, upscale). 'auto' is cheap on clean pages; 'aggressive' adds a "
+             "binarize rescue for very low-contrast scans. Default: off.",
+    )
+    parser.add_argument(
+        "--extract-fields", action="store_true",
+        help="Run Brazilian fiscal field extraction (CPF/CNPJ/BRL/datas/contracheque "
+             "labels) on the OCR output and write <output>.extracted.json alongside.",
+    )
+    parser.add_argument(
+        "--llm-extract", action="store_true",
+        help="Second extraction pass through the local LLM (text-only, offline) that "
+             "tolerates cosmetic variations (extra slash, dash, spaces) where regex "
+             "fails. Only meaningful with --extract-fields. Regex wins for "
+             "checksum-validated fields; LLM fills gaps otherwise.",
+    )
+    parser.add_argument(
+        "--llm-extract-model",
+        help="Override the LLM model used for the structured extraction pass "
+             "(defaults to --model / LLM_MODEL).",
+    )
     parser.set_defaults(refine=True)
     return parser
 
@@ -102,6 +125,41 @@ async def run(args: argparse.Namespace, console: Console) -> None:
     )
 
     pdf_handler = PDFHandler()
+
+    image_preprocessor = None
+    crop_preprocessor = None
+    text_postprocessor = None
+    if args.preprocess != "off":
+        from src.pdf_ocr.preprocessing import (
+            PreprocessConfig,
+            preprocess_crop_bgr,
+            run_preprocess,
+        )
+        _cfg = PreprocessConfig(mode=args.preprocess)
+
+        def image_preprocessor(bgr, *, page_num: int):
+            out, _ = run_preprocess(bgr, _cfg)
+            return out
+
+        def crop_preprocessor(bgr):
+            return preprocess_crop_bgr(bgr, _cfg)
+
+    if args.extract_fields:
+        if args.llm_extract:
+            from src.pdf_ocr.postprocessing import (
+                LLMExtractConfig,
+                analyze_text_with_llm,
+            )
+            _llm_cfg = LLMExtractConfig(
+                model=args.llm_extract_model or args.model,
+                api_base=args.api_base,
+            )
+            async def text_postprocessor(pages_text):
+                return await analyze_text_with_llm(pages_text, _llm_cfg)
+        else:
+            from src.pdf_ocr.postprocessing import analyze_text
+            text_postprocessor = analyze_text
+
     if args.grounded:
         # Grounded path: bbox-native VLM returns text + positions in one call.
         backend_kwargs = {"max_image_dim": args.max_image_dim}
@@ -112,12 +170,16 @@ async def run(args: argparse.Namespace, console: Console) -> None:
         pipeline = OCRPipeline(
             pdf_handler=pdf_handler,
             grounded_backend=PromptedGroundedOCR(**backend_kwargs),
+            text_postprocessor=text_postprocessor,
         )
     else:
         pipeline = OCRPipeline(
             aligner=HybridAligner(),
             ocr_processor=OCRProcessor(api_base=args.api_base, model=args.model),
             pdf_handler=pdf_handler,
+            image_preprocessor=image_preprocessor,
+            crop_preprocessor=crop_preprocessor,
+            text_postprocessor=text_postprocessor,
         )
 
     output_path = resolve_output_path(args.input_pdf, args.output_pdf)
@@ -155,6 +217,41 @@ async def run(args: argparse.Namespace, console: Console) -> None:
             raise
 
     console.print(f"[bold green]Done! Saved to '{output_path}'[/bold green]")
+
+    if args.extract_fields and pipeline.last_result is not None:
+        _write_extracted_json(pipeline.last_result, output_path, console)
+
+
+def _write_extracted_json(result, output_pdf_path: str, console: Console) -> None:
+    """Serialize DocumentResult.fields/warnings to <output_pdf>.extracted.json."""
+    import json
+    from dataclasses import asdict
+    from datetime import date
+    from decimal import Decimal
+
+    out = Path(output_pdf_path).with_suffix(".extracted.json")
+
+    def default(o):
+        if isinstance(o, Decimal):
+            return str(o)
+        if isinstance(o, date):
+            return o.isoformat()
+        raise TypeError(f"unserializable: {type(o)!r}")
+
+    payload = {
+        "output_pdf": result.output_pdf,
+        "warnings": list(result.warnings),
+        "fields": {
+            name: [asdict(f) for f in entries]
+            for name, entries in result.fields.items()
+        },
+    }
+    out.write_text(json.dumps(payload, default=default, ensure_ascii=False, indent=2))
+    console.print(f"[bold green]Extracted fields saved to '{out}'[/bold green]")
+    if result.warnings:
+        console.print(f"[yellow]Warnings ({len(result.warnings)}):[/yellow]")
+        for w in result.warnings:
+            console.print(f"  [yellow]• {w}[/yellow]")
 
 
 def main() -> None:

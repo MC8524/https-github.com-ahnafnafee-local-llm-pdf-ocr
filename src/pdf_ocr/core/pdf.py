@@ -10,8 +10,10 @@ step first.
 import base64
 import io
 from pathlib import Path
+from typing import Callable, Optional
 
 import fitz  # PyMuPDF
+import numpy as np
 from PIL import Image, ImageSequence
 
 
@@ -20,8 +22,32 @@ IMAGE_EXTENSIONS = frozenset({
 })
 
 
+ImagePreprocessor = Callable[..., "np.ndarray"]
+"""Signature: (bgr_ndarray, *, page_num: int) -> bgr_ndarray."""
+
+
 def _is_image_path(path: str | Path) -> bool:
     return Path(path).suffix.lower() in IMAGE_EXTENSIONS
+
+
+def _pixmap_to_bgr(pix: "fitz.Pixmap") -> "np.ndarray":
+    """Convert a PyMuPDF pixmap to a BGR ndarray (what OpenCV expects)."""
+    mode = "RGBA" if pix.alpha else "RGB"
+    img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+    if mode == "RGBA":
+        img = img.convert("RGB")
+    arr = np.asarray(img)  # RGB
+    return arr[:, :, ::-1].copy()  # BGR
+
+
+def _bgr_to_base64_jpeg(
+    bgr: "np.ndarray", *, max_dim: int, quality: int = 50
+) -> str:
+    img = Image.fromarray(bgr[:, :, ::-1])  # BGR -> RGB
+    img.thumbnail((max_dim, max_dim))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
 class PDFHandler:
@@ -39,6 +65,8 @@ class PDFHandler:
         pdf_path,
         dpi: int = 150,
         max_image_dim: int = 1024,
+        *,
+        image_preprocessor: Optional[ImagePreprocessor] = None,
     ) -> dict[int, str]:
         """
         Render every page to a base64-encoded JPEG, capped at `max_image_dim`
@@ -54,33 +82,146 @@ class PDFHandler:
           - GLM-OCR:1.1B (Ollama): ~640 — larger images crash the runner
           - Florence-2 / MinerU: see their docs
 
+        When `image_preprocessor` is set, each page is passed through it as a
+        BGR ndarray (OpenCV convention) between rasterization and JPEG encode.
+
         Returns a dict of {page_num: base64_str}.
         """
         if _is_image_path(pdf_path):
-            return self._images_from_image_file(pdf_path, max_image_dim)
+            return self._images_from_image_file(
+                pdf_path, max_image_dim, image_preprocessor=image_preprocessor
+            )
 
         images: dict[int, str] = {}
         doc = fitz.open(pdf_path)
         try:
             for page_num, page in enumerate(doc):
                 pix = page.get_pixmap(dpi=dpi)
-                img = Image.open(io.BytesIO(pix.tobytes("jpg", jpg_quality=50)))
-                img.thumbnail((max_image_dim, max_image_dim))
-
-                buffer = io.BytesIO()
-                img.save(buffer, format="JPEG", quality=50)
-                images[page_num] = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                if image_preprocessor is not None:
+                    bgr = _pixmap_to_bgr(pix)
+                    bgr = image_preprocessor(bgr, page_num=page_num)
+                    images[page_num] = _bgr_to_base64_jpeg(
+                        bgr, max_dim=max_image_dim, quality=50
+                    )
+                else:
+                    img = Image.open(io.BytesIO(pix.tobytes("jpg", jpg_quality=50)))
+                    img.thumbnail((max_image_dim, max_image_dim))
+                    buffer = io.BytesIO()
+                    img.save(buffer, format="JPEG", quality=50)
+                    images[page_num] = base64.b64encode(
+                        buffer.getvalue()
+                    ).decode("utf-8")
         finally:
             doc.close()
         return images
 
+    def convert_to_images_with_text(
+        self,
+        pdf_path,
+        dpi: int = 150,
+        max_image_dim: int = 1024,
+        *,
+        image_preprocessor: Optional[ImagePreprocessor] = None,
+        min_embedded_chars: int = 50,
+        min_embedded_area_frac: float = 0.10,
+    ) -> tuple[dict[int, str], dict[int, str]]:
+        """
+        Like `convert_to_images`, but also returns a dict of embedded text per
+        page for pages that already have a usable text layer. Callers can
+        short-circuit OCR entirely on those pages.
+
+        Returns (images, embedded_text). `embedded_text[page_num]` is only
+        present when the page's text layer passes the usability threshold
+        (>= `min_embedded_chars` chars AND covers >= `min_embedded_area_frac`
+        of the page area).
+
+        Image inputs never carry a text layer, so `embedded_text` is always
+        empty for those.
+        """
+        if _is_image_path(pdf_path):
+            images = self._images_from_image_file(
+                pdf_path, max_image_dim, image_preprocessor=image_preprocessor
+            )
+            return images, {}
+
+        images: dict[int, str] = {}
+        embedded: dict[int, str] = {}
+        doc = fitz.open(pdf_path)
+        try:
+            for page_num, page in enumerate(doc):
+                if self.has_embedded_text(
+                    page,
+                    min_chars=min_embedded_chars,
+                    min_area_frac=min_embedded_area_frac,
+                ):
+                    embedded[page_num] = page.get_text("text") or ""
+                pix = page.get_pixmap(dpi=dpi)
+                if image_preprocessor is not None:
+                    bgr = _pixmap_to_bgr(pix)
+                    bgr = image_preprocessor(bgr, page_num=page_num)
+                    images[page_num] = _bgr_to_base64_jpeg(
+                        bgr, max_dim=max_image_dim, quality=50
+                    )
+                else:
+                    img = Image.open(io.BytesIO(pix.tobytes("jpg", jpg_quality=50)))
+                    img.thumbnail((max_image_dim, max_image_dim))
+                    buffer = io.BytesIO()
+                    img.save(buffer, format="JPEG", quality=50)
+                    images[page_num] = base64.b64encode(
+                        buffer.getvalue()
+                    ).decode("utf-8")
+        finally:
+            doc.close()
+        return images, embedded
+
     @staticmethod
-    def _images_from_image_file(path, max_image_dim: int) -> dict[int, str]:
+    def has_embedded_text(
+        page,
+        *,
+        min_chars: int = 50,
+        min_area_frac: float = 0.10,
+    ) -> bool:
+        """
+        True when the PyMuPDF page carries a meaningful text layer.
+
+        Dual threshold to avoid false positives on PDFs with only a watermark
+        or footer text: requires both a character-count floor and an
+        area-coverage floor.
+        """
+        text = page.get_text("text") or ""
+        if len(text.strip()) < min_chars:
+            return False
+        page_area = page.rect.width * page.rect.height
+        if page_area <= 0:
+            return False
+        covered = 0.0
+        for b in page.get_text("blocks") or []:
+            # blocks: (x0, y0, x1, y1, text, block_no, block_type)
+            if len(b) < 4:
+                continue
+            x0, y0, x1, y1 = b[:4]
+            covered += max(0.0, (x1 - x0)) * max(0.0, (y1 - y0))
+        return (covered / page_area) >= min_area_frac
+
+    @staticmethod
+    def _images_from_image_file(
+        path,
+        max_image_dim: int,
+        *,
+        image_preprocessor: Optional[ImagePreprocessor] = None,
+    ) -> dict[int, str]:
         """Load a JPEG/PNG/TIFF/BMP; multi-frame TIFFs become multiple pages."""
         images: dict[int, str] = {}
         with Image.open(path) as src:
             for page_num, frame in enumerate(ImageSequence.Iterator(src)):
                 img = frame.convert("RGB").copy()
+                if image_preprocessor is not None:
+                    bgr = np.asarray(img)[:, :, ::-1].copy()  # RGB -> BGR
+                    bgr = image_preprocessor(bgr, page_num=page_num)
+                    images[page_num] = _bgr_to_base64_jpeg(
+                        bgr, max_dim=max_image_dim, quality=80
+                    )
+                    continue
                 img.thumbnail((max_image_dim, max_image_dim))
                 buffer = io.BytesIO()
                 img.save(buffer, format="JPEG", quality=80)
