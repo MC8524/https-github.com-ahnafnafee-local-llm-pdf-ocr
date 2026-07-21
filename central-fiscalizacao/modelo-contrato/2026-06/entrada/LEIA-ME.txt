@@ -1,0 +1,12 @@
+Coloque nesta pasta o pacote da competência recebido da empresa:
+
+- Folha de pagamento e planilha de movimentação
+- Comprovantes de salário e benefícios (VA/cesta, VT)
+- DCTFWeb, FGTS Digital (Relação de Categorias), DARF e comprovantes
+- Documentos de admissão / rescisão / férias, quando houver evento no mês
+- E-mails trocados com a contratada (PDF do Outlook) — eles contam a
+  história da competência e definem a cronologia do relatório
+- O HTML do relatório SEI base (Relatorio___SEI_NN.html), quando já criado
+
+Não renomeie os arquivos: a skill faz o inventário pelo conteúdo.
+A pasta auditoria/ ao lado será criada pela skill com o resultado.

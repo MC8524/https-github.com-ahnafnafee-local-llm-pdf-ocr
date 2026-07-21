@@ -1,0 +1,56 @@
+# =====================================================================
+# Configuração do contrato — Central de Fiscalização
+# Copie este arquivo para a pasta raiz do contrato e preencha os campos.
+# Tudo o que está aqui deixa de ser perguntado a cada competência.
+# =====================================================================
+
+contrato:
+  numero: ""                 # ex.: "12/2024"
+  objeto: ""                 # ex.: "Prestação de serviços de apoio administrativo"
+  vigencia_inicio: ""        # AAAA-MM-DD
+  vigencia_fim: ""           # AAAA-MM-DD
+  processo_sei: ""           # nº do processo SEI do contrato
+
+contratada:
+  razao_social: ""
+  cnpj: ""
+  email_contato: ""
+
+# CNPJ que DEVE aparecer como tomador na folha, FGTS Digital e DCTFWeb.
+# Trabalhador lançado fora deste tomador é achado (Tomador Incorreto).
+tomador:
+  orgao: "HC-UFPE / EBSERH"
+  cnpj: ""
+
+# Convenção coletiva aplicável e benefícios que ela obriga.
+cct:
+  sindicato: ""
+  registro_mte: ""           # ex.: "PE000123/2026"
+  beneficios:
+    vale_alimentacao: null   # valor mensal em R$, ou null se a CCT prevê cesta básica
+    cesta_basica: null       # valor mensal em R$, ou null
+    vale_transporte: true    # desconto em folha exige concessão comprovada
+
+# Categorias do contrato. A distinção mensalista x diarista muda a leitura
+# da folha (campo "Salário" mensal x "valor/dia"). Não chamar todo mundo
+# de diarista.
+categorias:
+  mensalistas: []            # ex.: [telefonista, motorista, tecnico_edificacao, administrativo]
+  diaristas: []              # ex.: [costureira]
+
+postos:
+  total: null                # nº de postos contratados
+  detalhamento: []           # ex.: [{categoria: telefonista, quantidade: 4}]
+
+# Histórico usado para caracterizar reincidência em notificações.
+# Acrescente uma entrada a cada notificação emitida.
+notificacoes_anteriores: []
+  # - numero: "05/2026"
+  #   data: "2026-03-14"
+  #   assunto: "Atraso no pagamento do vale-alimentação"
+  #   situacao: "sanada"     # sanada | pendente | em tratativa
+
+# Pendências que atravessam competências (a skill relê isto a cada mês).
+pendencias_abertas: []
+  # - descricao: "Comprovante de FGTS da rescisão de fulano"
+  #   origem_competencia: "2026-04"
