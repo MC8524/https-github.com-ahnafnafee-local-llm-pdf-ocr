@@ -1,0 +1,365 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html lang="pt-br">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Notificação SEI [NN/AAAA] — [Empresa]</title>
+<style type="text/css">
+
+/* ============================================================
+   CLASSES OFICIAIS DO SEI — com counter-set
+   ============================================================ */
+p.Item_Nivel1 {
+  text-transform: uppercase;
+  font-weight: bold;
+  background-color: #e6e6e6;
+  font-size: 12pt;
+  font-family: Calibri;
+  text-align: justify;
+  word-wrap: normal;
+  text-indent: 0;
+  margin: 12pt 0 8pt 0;
+  padding: 6pt 8pt;
+  line-height: 1.4;
+  counter-increment: item-n1;
+  counter-set: item-n2 0 romano_maiusculo 0 letra_minuscula 0;
+}
+p.Item_Nivel1:before {
+  content: counter(item-n1) ".";
+  display: inline-block;
+  width: 25mm;
+  font-weight: normal;
+}
+p.Item_Nivel2 {
+  font-size: 12pt;
+  font-family: Calibri;
+  text-indent: 0mm;
+  text-align: justify;
+  word-wrap: normal;
+  margin: 5pt 0;
+  line-height: 1.4;
+  counter-increment: item-n2;
+  counter-set: romano_maiusculo 0 letra_minuscula 0;
+}
+p.Item_Nivel2:before {
+  content: counter(item-n1) "." counter(item-n2) ".";
+  display: inline-block;
+  width: 25mm;
+  font-weight: normal;
+}
+p.Item_Inciso_Romano {
+  font-size: 12pt;
+  font-family: Calibri;
+  text-align: justify;
+  word-wrap: break-word;
+  text-indent: 0mm;
+  line-height: 1.4;
+  counter-increment: romano_maiusculo;
+  counter-set: letra_minuscula 0;
+  margin: 4pt 0 4pt 35mm;
+}
+p.Item_Inciso_Romano:before {
+  content: counter(romano_maiusculo, upper-roman) " - ";
+  display: inline-block;
+  width: 15mm;
+  font-weight: normal;
+}
+p.Texto_Justificado {
+  font-size: 12pt;
+  font-family: Calibri;
+  text-align: justify;
+  line-height: 1.4;
+}
+
+body {
+  font-family: Calibri, sans-serif;
+  font-size: 12pt;
+  color: #000;
+  margin: 0;
+  padding: 20px;
+  background: #f5f5f5;
+  counter-reset: item-n1 item-n2 romano_maiusculo letra_minuscula;
+}
+.documento {
+  max-width: 21cm;
+  margin: 0 auto;
+  background: #fff;
+  padding: 24px 28px;
+  border: 1px solid #d4d4d4;
+}
+
+/* ============================================================
+   TABELA DE IDENTIFICAÇÃO — 80% centralizada
+   ============================================================ */
+table.identificacao {
+  border-collapse: collapse;
+  border: 1px solid #1f4e78;
+  width: 80%;
+  margin: 0 auto 18px;
+}
+table.identificacao td {
+  border: 1px solid #c0cbd6;
+  padding: 7pt 10pt;
+  vertical-align: top;
+  font-family: Calibri;
+  font-size: 12pt;
+  background-color: #f7f9fc;
+  line-height: 1.4;
+}
+table.identificacao td.rotulo {
+  width: 26%;
+  white-space: nowrap;
+  font-weight: bold;
+  color: #1f4e78;
+  background-color: #e9f0f7;
+}
+table.identificacao tr.cabecalho-tn td {
+  background-color: #1f4e78;
+  color: #fff;
+  font-weight: bold;
+  text-align: center;
+  letter-spacing: 0.04em;
+  padding: 8pt 10pt;
+  font-size: 12pt;
+  border: 1px solid #1f4e78;
+}
+
+/* ============================================================
+   CAIXAS DE DESTAQUE
+   ============================================================ */
+table.caixa-cinza-rotulo {
+  border-collapse: collapse;
+  border: 1px solid #646464;
+  width: 100%;
+  margin: 10px 0;
+}
+table.caixa-cinza-rotulo td {
+  background-color: #d9d9d9;
+  padding: 8pt 12pt;
+  text-align: center;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 12pt;
+  font-family: Calibri;
+}
+
+table.caixa-azul {
+  border-collapse: collapse;
+  border: 1px solid #1f4e78;
+  width: 80%;
+  margin: 10px auto 14px;
+  font-family: Calibri;
+  font-size: 12pt;
+}
+table.caixa-azul td {
+  border: 1px solid #1f4e78;
+  padding: 10pt 14pt;
+  text-align: justify;
+  line-height: 1.4;
+  background-color: #f7f9fc;
+}
+
+table.caixa-vermelha {
+  border-collapse: collapse;
+  border: 2px solid #c0392b;
+  width: 80%;
+  margin: 14px auto 18px;
+  font-family: Calibri;
+  font-size: 12pt;
+}
+table.caixa-vermelha td {
+  border: 1px solid #c0392b;
+  padding: 12pt 16pt;
+  text-align: center;
+  line-height: 1.5;
+  background-color: #fff5f3;
+  color: #7a1f12;
+  font-weight: bold;
+}
+
+table.ciencia {
+  border-collapse: collapse;
+  border: 1px solid #808080;
+  width: 100%;
+  margin: 18px 0;
+}
+table.ciencia td {
+  border: 1px solid #808080;
+  padding: 12pt 14pt;
+  background-color: #fafafa;
+}
+table.ciencia p {
+  margin: 4pt 0;
+}
+
+</style>
+</head>
+<body>
+<div class="documento">
+
+<!-- ============================================================
+     BLOCO 2 — TABELA DE IDENTIFICAÇÃO
+     ============================================================ -->
+<table class="identificacao">
+  <tr class="cabecalho-tn">
+    <td colspan="2">
+      TERMO DE OCORRÊNCIA<br>
+      REGISTRO DE OCORRÊNCIA Nº [NN]/[AAAA]/HC-UFPE/EBSERH
+    </td>
+  </tr>
+  <tr>
+    <td class="rotulo">CONTRATO Nº:</td>
+    <td>[NN/AAAA]</td>
+  </tr>
+  <tr>
+    <td class="rotulo">EMPRESA CONTRATADA:</td>
+    <td>[RAZÃO SOCIAL COMPLETA EM CAIXA ALTA]</td>
+  </tr>
+  <tr>
+    <td class="rotulo">CNPJ:</td>
+    <td>[XX.XXX.XXX/XXXX-XX]</td>
+  </tr>
+  <tr>
+    <td class="rotulo">OBJETO:</td>
+    <td>[Resumo do objeto contratual em uma linha]</td>
+  </tr>
+  <tr>
+    <td class="rotulo">ASSUNTO:</td>
+    <td>[Frase técnica resumindo o que a notificação trata]</td>
+  </tr>
+</table>
+
+<!-- ============================================================
+     BLOCO 3 — CAIXA RÓTULO "PONTOS IRREGULARES" (opcional)
+     ============================================================ -->
+<table class="caixa-cinza-rotulo">
+  <tr>
+    <td>PONTOS IRREGULARES E PROVIDÊNCIAS REQUERIDAS</td>
+  </tr>
+</table>
+
+<!-- ============================================================
+     BLOCO 4 — PARÁGRAFO INTRODUTÓRIO COM VERBO DE NOTIFICAÇÃO
+     ============================================================ -->
+<p class="Texto_Justificado">
+  O Hospital das Clínicas da UFPE (HC-UFPE/EBSERH), por meio de sua Fiscalização Administrativa, <strong>NOTIFICA</strong> essa empresa acerca [do/da] [resumo do motivo], conforme verificado na análise da documentação da competência [MM/AAAA].
+</p>
+
+<!-- ============================================================
+     BLOCO 5 — SEÇÃO 1: CONTEXTUALIZAÇÃO (opcional, reincidência)
+     ============================================================ -->
+<p class="Item_Nivel1">DA CONTEXTUALIZAÇÃO: HISTÓRICO REITERADO DE IRREGULARIDADES</p>
+
+<p class="Item_Nivel2">
+  A empresa [RAZÃO SOCIAL] já foi notificada formalmente, em mais de uma oportunidade, acerca de [tema], conforme registrado na <strong>Notificação SEI nº [NN]/[AAAA]/UFAC/SAD/DAF/GAD/HC-UFPE-EBSERH</strong> e na <strong>Notificação SEI nº [NN]/[AAAA]</strong>, vinculadas ao Contrato nº [NN/AAAA].
+</p>
+
+<p class="Item_Nivel2">
+  As referidas notificações apontaram o padrão de [tipo de falha] e o descumprimento de prazos fixados pela Fiscalização para regularização das pendências. A empresa foi expressamente advertida de que a reincidência implicaria adoção de medidas administrativas sancionadoras.
+</p>
+
+<p class="Item_Nivel2">
+  A presente notificação destina-se a registrar que, não obstante as advertências formais já expedidas, o padrão de falhas <strong>persiste</strong> na execução do Contrato nº [NN/AAAA], conforme descrito nos itens seguintes.
+</p>
+
+<!-- ============================================================
+     BLOCO 6 — SEÇÃO 2: FATOS VERIFICADOS
+     ============================================================ -->
+<p class="Item_Nivel1">DOS FATOS VERIFICADOS NA COMPETÊNCIA DE [MM/AAAA]</p>
+
+<p class="Item_Nivel2">
+  <strong>[Título curto do primeiro fato]:</strong> [Descrição em prosa, com data, número de documento, página de evidência, e o efeito sobre a obrigação contratual ou legal].
+</p>
+
+<p class="Item_Inciso_Romano">[Primeiro detalhamento ou evidência específica].</p>
+<p class="Item_Inciso_Romano">[Segundo detalhamento].</p>
+
+<p class="Item_Nivel2">
+  <strong>[Título curto do segundo fato]:</strong> [Descrição].
+</p>
+
+<!-- ============================================================
+     BLOCO 7 — SEÇÃO 3: FUNDAMENTAÇÃO
+     ============================================================ -->
+<p class="Item_Nivel1">DA FUNDAMENTAÇÃO LEGAL E CONTRATUAL</p>
+
+<p class="Item_Nivel2">
+  Conforme [referência normativa aplicável: IN 05/2017, CLT, CCT ou cláusula contratual], [síntese da obrigação descumprida].
+</p>
+
+<p class="Item_Nivel2">
+  A Cláusula [N] do Contrato nº [NN/AAAA] estabelece [síntese da cláusula].
+</p>
+
+<p class="Item_Nivel2">
+  O descumprimento dessas obrigações, conforme prevê a Cláusula [N] do contrato, sujeita a contratada a [tipo de penalidade], sem prejuízo da abertura de processo administrativo de apuração de responsabilidade.
+</p>
+
+<!-- ============================================================
+     BLOCO 8 — SEÇÃO 4: PROVIDÊNCIAS REQUERIDAS
+     ============================================================ -->
+<p class="Item_Nivel1">DAS PROVIDÊNCIAS REQUERIDAS</p>
+
+<p class="Item_Nivel2">
+  Apresentar, no prazo desta notificação, [documento específico] referente à competência [MM/AAAA].
+</p>
+
+<p class="Item_Nivel2">
+  Comprovar [providência], com cópia do [documento comprobatório].
+</p>
+
+<p class="Item_Nivel2">
+  Apresentar manifestação formal sobre [fato], esclarecendo [pontos específicos].
+</p>
+
+<!-- ============================================================
+     BLOCO 9 — CAIXA DE PRAZO (vermelha)
+     ============================================================ -->
+<table class="caixa-vermelha">
+  <tr>
+    <td>
+      PRAZO PARA RESPOSTA: [X] DIAS ÚTEIS, A CONTAR DO RECEBIMENTO DESTA NOTIFICAÇÃO.<br>
+      DATA-LIMITE: [DD/MM/AAAA].<br>
+      O DESCUMPRIMENTO DO PRAZO ENSEJARÁ A ABERTURA DE PROCESSO ADMINISTRATIVO DE APURAÇÃO DE RESPONSABILIDADE.
+    </td>
+  </tr>
+</table>
+
+<!-- ============================================================
+     BLOCO opcional — CAIXA AZUL (diretriz/requisito)
+     ============================================================ -->
+<!--
+<table class="caixa-azul">
+  <tr>
+    <td>
+      [Texto da diretriz, requisito ou ponto que merece destaque, sem ser prazo crítico.]
+    </td>
+  </tr>
+</table>
+-->
+
+<!-- ============================================================
+     BLOCO 10 — CIÊNCIA (opcional)
+     ============================================================ -->
+<table class="ciencia">
+  <tr>
+    <td>
+      <p class="Texto_Justificado">Estou ciente do conteúdo desta notificação e do prazo que terei para cumprir com as exigências aqui registradas.</p>
+      <p class="Texto_Justificado">Recebi a primeira via em ___/___/_____ às ____:____ (hora).</p>
+      <p class="Texto_Justificado">Nome do responsável pela empresa: _________________________________________</p>
+      <p class="Texto_Justificado">Assinatura: __________________________________________________________________</p>
+      <p class="Texto_Justificado"><em>Poderá ser considerada a confirmação do recebimento via e-mail.</em></p>
+    </td>
+  </tr>
+</table>
+
+<!-- ============================================================
+     BLOCO 11 — REFERÊNCIA AO PROCESSO
+     ============================================================ -->
+<p class="Texto_Justificado" style="margin-top: 24pt;">
+  <strong>Referência:</strong> Processo nº [NÚMERO] SEI nº [NÚMERO]
+</p>
+
+</div>
+</body>
+</html>
