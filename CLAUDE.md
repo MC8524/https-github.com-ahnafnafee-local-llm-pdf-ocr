@@ -19,6 +19,18 @@ uv run main.py input.pdf -v                                   # verbose debug lo
 uv run uvicorn server:app --reload --port 8000                # web UI at http://localhost:8000
 ```
 
+This repository also contains a second, unrelated tool — `drescue`, a data
+recovery utility (see `docs/DRESCUE.md`). It shares nothing with the OCR
+pipeline and has no third-party dependencies:
+
+```bash
+python drescue_cli.py rescue /dev/sdb disk.img disk.map --direct   # image a failing disk
+python drescue_cli.py status disk.map                              # what was recovered
+python drescue_cli.py scan disk.img --deep                         # partitions + filesystems
+python drescue_cli.py carve disk.img -o out -m disk.map            # recover files, flag damaged ones
+uv run pytest tests/drescue -q                                     # its tests (~7s, no models)
+```
+
 Debug/inspection tools live in `scripts/` (`visualize_bboxes.py`, `debug_alignment.py`, `verify_output.py`, `inspect_pdf.py`, etc.) and are run with `uv run scripts/<name>.py <args>`.
 
 ### Tests
@@ -135,3 +147,60 @@ Common forks / extensions map cleanly onto the injection points above:
 - **Different OCR backend**: implement `perform_ocr(image_base64) -> list[str]` and pass as `ocr_processor=`.
 
 No entry-point edits required in any of these cases.
+
+## `drescue` — data recovery (`src/drescue/`)
+
+Unrelated to the OCR pipeline; it lives here only because both tools share the
+repository. Standard library only — no third-party imports — because it has to
+run from a rescue USB stick. Full documentation in `docs/DRESCUE.md`.
+
+```
+PDF-OCR pipeline  ── src/pdf_ocr/   (Surya + LLM, heavy deps)
+drescue           ── src/drescue/   (stdlib only, entry point drescue_cli.py)
+```
+
+### What it does
+
+Five commands: `rescue` (fault-tolerant imaging), `status` (read a mapfile),
+`scan` (partitions + filesystems), `carve` (signature file recovery), `verify`
+(compare image against the medium).
+
+### Core invariants
+
+- **The mapfile is GNU ddrescue's format, byte for byte.** Status characters are
+  `?` non-tried, `*` non-trimmed, `/` non-scraped, `-` bad-sector, `+` finished.
+  Mapfiles are interchangeable in both directions with `ddrescue` itself; a
+  verbatim ddrescue 1.27 mapfile is parsed as a regression test. Do not
+  "improve" the format.
+- **`ExtentMap` is always contiguous, gap-free and merged.** Every phase is
+  expressed as "read the ranges with status X, rewrite them as Y". `set_status`
+  splits and re-merges; the constructor rejects a non-contiguous map.
+- **Phase order is the whole point**: copy (skip fast on error) → trim (edges of
+  each failed cluster) → scrape (sector by sector) → retry (bad sectors only).
+  A dying drive has a limited number of reads left; the order spends them on the
+  recoverable data first. Changing it changes the tool's value.
+- **The source is never written to.** Opened `O_RDONLY`; destinations that are
+  block devices need `--force`.
+- **Bounding boxes of damage are sector-granular.** One bad sector must cost one
+  sector, not one 64 KiB cluster — that is what trim and scrape buy, and there
+  is a test asserting it.
+
+### Injection seams
+
+`Rescuer(reader, writer, mapfile, config)` takes any object with
+`pread(pos, size) -> bytes` / `size` / `sector_size` as the reader and anything
+with `pwrite(pos, data)` as the writer, which is how the engine is tested
+against simulated bad sectors (`tests/drescue/fakes.py::FaultyReader`) instead
+of a real dying disk. Adding a filesystem probe means appending a `Probe` to
+`scan/filesystems.py::PROBES`; adding a carve target means appending a
+`Signature` to `scan/carver.py::SIGNATURES`.
+
+### Field parsing discipline
+
+Filesystem and partition parsers must drop implausible values rather than report
+them, so an offset that turns out to be wrong shows up as a missing label, never
+as a confidently wrong one. ext2/3/4 and FAT32 are cross-validated against
+`blkid` in the tests, MBR/GPT against `partx`; the other filesystems are tested
+against fixtures built from the same layout assumptions as the parser, which is
+a consistency check, not an independent one. `docs/DRESCUE.md` says so
+explicitly — keep that disclosure accurate if you extend the probes.
